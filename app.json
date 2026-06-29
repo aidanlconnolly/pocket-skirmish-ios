@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Pocket Skirmish",
+    "slug": "pocket-skirmish",
+    "version": "1.0.0",
+    "orientation": "landscape",
+    "scheme": "pocketskirmish",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#070d0a",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "bundleIdentifier": "com.aidanlconnolly.pocketskirmish",
+      "supportsTablet": true,
+      "requireFullScreen": true,
+      "infoPlist": {
+        "UIStatusBarHidden": true
+      }
+    },
+    "android": {
+      "package": "com.aidanlconnolly.pocketskirmish"
+    }
+  }
+}
