@@ -101,6 +101,7 @@
     <div class="pill" id="turnPill"><span class="dot"></span><span id="turnTxt">Your Move</span></div>
     <div class="pill gold"><span id="goldTxt">0</span><span class="inc" id="incTxt"></span></div>
     <div class="spacer"></div>
+    <button class="btn-ghost" id="muteBtn" title="Sound on/off">🔊</button>
     <button class="btn-ghost" id="helpBtn">Help</button>
     <button class="btn-end" id="endBtn">End Turn ▶</button>
   </div>
@@ -203,7 +204,7 @@
    ============================================================ */
 const TILE=56, TY=48, LIP=10;            // grid metrics — square grid kept so input math stays simple
 const IW=64,IH=32,HW=32,HH=16,EH=13,WALLH=20;  // isometric tile w/h, half-w/h, elevation step, island thickness
-let DPR=1,OX=0,OY=0;                            // device pixel ratio + iso board origin (set per map in fitCanvas)
+let DPR=1,OX=0,OY=0,terrCanvas=null;           // device pixel ratio, iso board origin, cached static-terrain layer
 
 /* ---------- terrain ---------- */
 const TT = {
@@ -362,7 +363,7 @@ function canCounter(def,atk){if(UNITS[def.type].indirect)return false;if((DMG[de
 function forecast(atk,def){const dmg=predictDamage(atk,def);const kill=dmg>=def.hp;let counter=0;
   if(!kill&&canCounter(def,atk))counter=predictDamage({...def,hp:def.hp-dmg},atk);return {dmg,kill,counter};}
 function resolveCombat(atk,def){
-  fxAttack(atk,def,UNITS[atk.type].indirect||atk.type==='rocket');
+  SFX.fire();fxAttack(atk,def,UNITS[atk.type].indirect||atk.type==='rocket');
   const dmg=predictDamage(atk,def);def.hp-=dmg;popup(def.x,def.y,'-'+dmg,def.owner==='P'?'#ff8a82':'#ffd27a');
   if(def.hp<=0){killUnit(def);}
   else if(canCounter(def,atk)){const cd=predictDamage(def,atk);if(cd>0){atk.hp-=cd;popup(atk.x,atk.y,'-'+cd,atk.owner==='P'?'#ff8a82':'#ffd27a');if(atk.hp<=0)killUnit(atk);}}
@@ -375,7 +376,7 @@ function killUnit(u){resetCaptureBy(u.id);fxBoom(u.x,u.y);if(u.cargo&&u.cargo.le
 function resetCaptureBy(id,except){for(let y=0;y<S.rows;y++)for(let x=0;x<S.cols;x++){const t=tileAt(x,y);
   if(t.capBy===id&&!(except&&except[0]===x&&except[1]===y)){t.capLeft=20;t.capBy=null;}}}
 function doCapture(u){const t=tileAt(u.x,u.y);resetCaptureBy(u.id,[u.x,u.y]);t.capBy=u.id;t.capLeft-=Math.max(1,u.hp);
-  if(t.capLeft<=0){t.owner=u.owner;t.capLeft=20;t.capBy=null;popup(u.x,u.y,'CAPTURED','#9fe0a8');if(t.t==='hq')endGame(u.owner);}
+  if(t.capLeft<=0){t.owner=u.owner;t.capLeft=20;t.capBy=null;SFX.capture();popup(u.x,u.y,'CAPTURED','#9fe0a8');if(t.t==='hq')endGame(u.owner);}
   else popup(u.x,u.y,'HOLD '+Math.round((1-t.capLeft/20)*100)+'%','#f5c84b');u.acted=true;}
 
 /* turn flow */
@@ -383,9 +384,10 @@ function startTurn(side){S.gold[side]+=income(side);
   for(const u of S.units)if(u.owner===side){u.acted=false;u.moved=false;
     const bt=tileAt(u.x,u.y);                                                       // repair: units on your buildings heal +2/turn
     if(!u.loaded&&u.hp>0&&u.hp<10&&TT[bt.t].building&&bt.owner===side){u.hp=Math.min(10,u.hp+2);popup(u.x,u.y,'+2 ✚','#7ce08a');}}
-  for(let y=0;y<S.rows;y++)for(let x=0;x<S.cols;x++){const t=tileAt(x,y);if(t.capBy!=null){const cu=unitById(t.capBy);if(!cu||cu.x!==x||cu.y!==y){t.capLeft=20;t.capBy=null;}}}
+  for(let y=0;y<S.rows;y++)for(let x=0;x<S.cols;x++){const t=tileAt(x,y);if(t.t==='factory'&&t.owner===side)t.builtThisTurn=0;
+    if(t.capBy!=null){const cu=unitById(t.capBy);if(!cu||cu.x!==x||cu.y!==y){t.capLeft=20;t.capBy=null;}}}
   checkEnd();}
-function endTurn(){if(S.over||S.busy||!isHuman(S.side))return;tutAdvance('end');deselect();hideBuild();const next=foe(S.side);if(next==='P')S.turn++;
+function endTurn(){if(S.over||S.busy||!isHuman(S.side))return;SFX.end();tutAdvance('end');deselect();hideBuild();const next=foe(S.side);if(next==='P')S.turn++;
   if(S.mode==='ai'&&next==='E'){S.side='E';S.busy=true;startTurn('E');updateHUD();setHint('Enemy is moving…');runAI();}
   else{S.side=next;startTurn(next);updateHUD();if(S.mode==='hotseat'){S.busy=true;showPass(next);}draw();}}
 function aiEndTurn(){S.side='P';S.turn++;startTurn('P');S.busy=false;updateHUD();draw();}
@@ -399,7 +401,7 @@ function checkEnd(){if(S.over)return;
 function fitCanvas(){const ZOOM=1.6;DPR=Math.min(Math.max(window.devicePixelRatio||1,ZOOM),2.5);   // bump backing res so the desktop zoom stays crisp
   const sideM=14;OX=S.rows*HW+sideM;OY=2*EH+HH+12;                              // origin so the rotated diamond fits with margins
   const W=(S.cols+S.rows)*HW+2*sideM, H=OY+(S.cols+S.rows-1)*HH+WALLH+2*EH+16;
-  cv.width=W*DPR;cv.height=H*DPR;cv.style.maxWidth=Math.round(W*ZOOM)+'px';ctx.setTransform(DPR,0,0,DPR,0,0);}
+  cv.width=W*DPR;cv.height=H*DPR;cv.style.maxWidth=Math.round(W*ZOOM)+'px';ctx.setTransform(DPR,0,0,DPR,0,0);terrCanvas=null;}
 /* ---------- visual themes (per-map biome) — bright tabletop-diorama palette ----------
    each terrain has [top(lit face), side(bevel/shadow)]; plus ocean/foam/tree/rock tints */
 const THEMES={
@@ -429,18 +431,53 @@ function shade(hex,a){let n=parseInt(hex.slice(1),16),r=(n>>16)&255,g=(n>>8)&255
   const f=v=>Math.max(0,Math.min(255,Math.round(v+(a<0?v:255-v)*a)));return 'rgb('+f(r)+','+f(g)+','+f(b)+')';}
 function roundRect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
 function ell(cx,cy,rx,ry){ctx.beginPath();ctx.ellipse(cx,cy,rx,ry,0,0,7);ctx.fill();}
+/* ---------- sound: tiny synthesized SFX, no asset files ---------- */
+let AC=null, muted=localStorage.getItem('ps_mute')==='1';
+function ac(){if(AC===null){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=false;}}
+  if(AC&&AC.state==='suspended')AC.resume();return AC||null;}
+function tone(freq,dur,type,vol,slideTo){const c=ac();if(!c||muted)return;const o=c.createOscillator(),g=c.createGain();
+  o.type=type||'sine';o.frequency.setValueAtTime(freq,c.currentTime);if(slideTo)o.frequency.exponentialRampToValueAtTime(slideTo,c.currentTime+dur);
+  g.gain.setValueAtTime(vol||0.14,c.currentTime);g.gain.exponentialRampToValueAtTime(0.0001,c.currentTime+dur);
+  o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+dur+0.02);}
+function noiseHit(dur,vol,lp){const c=ac();if(!c||muted)return;const len=Math.floor(c.sampleRate*dur),buf=c.createBuffer(1,len,c.sampleRate),d=buf.getChannelData(0);
+  for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*(1-i/len);const n=c.createBufferSource();n.buffer=buf;
+  const f=c.createBiquadFilter();f.type='lowpass';f.frequency.value=lp||1400;const g=c.createGain();
+  g.gain.setValueAtTime(vol||0.3,c.currentTime);g.gain.exponentialRampToValueAtTime(0.0001,c.currentTime+dur);
+  n.connect(f);f.connect(g);g.connect(c.destination);n.start();n.stop(c.currentTime+dur+0.02);}
+const SFX={
+  select:()=>tone(520,0.05,'square',0.07),
+  move:()=>tone(280,0.09,'sine',0.09,400),
+  build:()=>{tone(440,0.08,'triangle',0.11);setTimeout(()=>tone(660,0.1,'triangle',0.11),70);},
+  fire:()=>{noiseHit(0.1,0.11,2200);tone(150,0.07,'sawtooth',0.07,80);},
+  boom:()=>noiseHit(0.32,0.28,700),
+  capture:()=>[0,90,180].forEach((d,i)=>setTimeout(()=>tone(440+i*160,0.12,'triangle',0.12),d)),
+  win:()=>[523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,0.18,'triangle',0.14),i*130)),
+  lose:()=>[392,330,247].forEach((f,i)=>setTimeout(()=>tone(f,0.22,'sine',0.13),i*160)),
+  end:()=>tone(340,0.13,'sine',0.07,250),
+};
+function toggleMute(){muted=!muted;localStorage.setItem('ps_mute',muted?'1':'0');const b=document.getElementById('muteBtn');if(b)b.textContent=muted?'🔇':'🔊';if(!muted)SFX.select();}
 
+function buildTerrain(P){                                            // bake the expensive static floor once per map
+  terrCanvas=document.createElement('canvas');terrCanvas.width=cv.width;terrCanvas.height=cv.height;
+  const _ctx=ctx;ctx=terrCanvas.getContext('2d');ctx.setTransform(DPR,0,0,DPR,0,0);
+  const W=cv.width/DPR,H=cv.height/DPR;
+  const og=ctx.createLinearGradient(0,0,0,H);og.addColorStop(0,P.ocean[0]);og.addColorStop(1,P.ocean[1]);ctx.fillStyle=og;ctx.fillRect(0,0,W,H);
+  for(let s=0;s<=S.cols+S.rows-2;s++)for(let gx=Math.max(0,s-(S.rows-1));gx<=Math.min(S.cols-1,s);gx++){const gy=s-gx;
+    if(tileAt(gx,gy).t==='sea')drawWaterBase(gx,gy,P);else drawGround(gx,gy,P);}
+  ctx=_ctx;
+}
 function draw(){
-  if(!S)return;ctx.setTransform(DPR,0,0,DPR,0,0);
-  const P=pal(),W=cv.width/DPR,H=cv.height/DPR;
-  ctx.clearRect(0,0,W,H);
-  const og=ctx.createLinearGradient(0,0,0,H);og.addColorStop(0,P.ocean[0]);og.addColorStop(1,P.ocean[1]);
-  ctx.fillStyle=og;ctx.fillRect(0,0,W,H);                            // ocean the island floats on
+  if(!S)return;const P=pal();
+  if(!terrCanvas)buildTerrain(P);
+  const k=S.shake||0,sx=k?(Math.random()*2-1)*k:0,sy=k?(Math.random()*2-1)*k:0;   // screen-shake offset
+  ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.setTransform(1,0,0,1,Math.round(sx*DPR),Math.round(sy*DPR));ctx.drawImage(terrCanvas,0,0);
+  ctx.setTransform(DPR,0,0,DPR,Math.round(sx*DPR),Math.round(sy*DPR));
+  for(let y=0;y<S.rows;y++)for(let x=0;x<S.cols;x++)if(tileAt(x,y).t==='sea')waterShimmer(x,y);   // live ripples over cached water
   const ov=S.sel?selSets(S.sel):null, hov=(S.hover&&!S.busy)?S.hover:null;
-  // back-to-front along the iso diagonal: each tile draws ground → highlight → standing art → its unit
+  // live layer only (floor is cached), back-to-front: highlight → standing art → unit
   for(let s=0;s<=S.cols+S.rows-2;s++)for(let gx=Math.max(0,s-(S.rows-1));gx<=Math.min(S.cols-1,s);gx++){const gy=s-gx;
     const t=tileAt(gx,gy);
-    if(t.t==='sea')drawWater(gx,gy,P);else drawGround(gx,gy,P);
     if(ov)tileHi(gx,gy,ov);
     else if(hov&&hov.x===gx&&hov.y===gy){ctx.strokeStyle='rgba(255,255,255,.55)';ctx.lineWidth=2;diamond(cX(gx,gy),cY(gx,gy),HW-2,HH-2);ctx.stroke();}
     if(t.t==='forest'){const cx=cX(gx,gy),cy=cY(gx,gy);tree(cx-9,cy-3,11,P,gx,gy,0);tree(cx+10,cy-6,9,P,gx,gy,1);tree(cx,cy+3,8,P,gx,gy,2);}
@@ -456,15 +493,17 @@ function draw(){
 function bkey(x,y){return TT[tileAt(x,y).t].building?'plains':tileAt(x,y).t;}
 // surface height (px) above the land plane: sea sits WALLH below; hills/mountains rise in EH steps. Off-board reads as sea.
 function hpx(x,y){if(!inB(x,y))return -WALLH;const t=tileAt(x,y).t;if(t==='sea')return -WALLH;if(t==='mountain')return 2*EH;if(t==='hill')return EH;return 0;}
-function drawWater(gx,gy,P){
+function drawWaterBase(gx,gy,P){                                       // static part → baked into the terrain cache
   const cx=cX(gx,gy),cy=cY(gx,gy);                                     // surface already sits a wall-depth below land
   ctx.fillStyle=P.g.sea[1];diamond(cx,cy,HW,HH);ctx.fill();
-  ctx.save();diamond(cx,cy,HW,HH);ctx.clip();
-  ctx.fillStyle=P.g.sea[0];ctx.fillRect(cx-HW,cy-HH,IW,HH);            // lighter upper half
-  const ph=(S.fxClock||0)*0.0016;ctx.strokeStyle='rgba(255,255,255,.16)';ctx.lineWidth=1.5;ctx.lineCap='round';
+  ctx.save();diamond(cx,cy,HW,HH);ctx.clip();ctx.fillStyle=P.g.sea[0];ctx.fillRect(cx-HW,cy-HH,IW,HH);ctx.restore();
+}
+function waterShimmer(gx,gy){                                          // live ripples drawn over the cached base
+  const cx=cX(gx,gy),cy=cY(gx,gy),ph=(S.fxClock||0)*0.0016;
+  ctx.strokeStyle='rgba(255,255,255,.16)';ctx.lineWidth=1.5;ctx.lineCap='round';
   for(let i=0;i<2;i++){const yy=cy-HH*0.3+i*HH*0.7+Math.sin(ph+gx*0.7+gy*1.2+i*2)*1.8,xx=cx-HW*0.4;
     ctx.beginPath();ctx.moveTo(xx,yy);ctx.quadraticCurveTo(xx+HW*0.4,yy-2.5,xx+HW*0.8,yy);ctx.stroke();}
-  ctx.restore();ctx.lineCap='butt';
+  ctx.lineCap='butt';
 }
 /* one front (SE/SW) face of an extruded block, dropping by h px */
 function wall(cx,cy,side,h,cl){const x2=cx+side*HW;
@@ -666,7 +705,7 @@ function fxAttack(atk,def,arc){const x1=cX(atk.x,atk.y),y1=cY(atk.x,atk.y)-8,x2=
   S.fx.push({type:'muzzle',x:x1,y:y1,t:0,dur:160});S.fx.push({type:'flash',x:x1,y:y1,t:0,dur:200,r:34});            // muzzle lights nearby tiles
   S.fx.push({type:arc?'shell':'tracer',x1,y1,x2,y2,t:0,dur:arc?420:200,color:atk.owner==='P'?'#bfe2ff':'#ffd0c8'});
   S.fx.push({type:'boom',x:x2,y:y2,t:-(arc?420:200),dur:380});S.fx.push({type:'flash',x:x2,y:y2,t:-(arc?420:200),dur:300,r:54});}
-function fxBoom(x,y){const X=cX(x,y),Y=cY(x,y)-8;S.fx.push({type:'boom',x:X,y:Y,t:0,dur:460,big:true});S.fx.push({type:'flash',x:X,y:Y,t:0,dur:360,r:66});}
+function fxBoom(x,y){const X=cX(x,y),Y=cY(x,y)-8;S.fx.push({type:'boom',x:X,y:Y,t:0,dur:460,big:true});S.fx.push({type:'flash',x:X,y:Y,t:0,dur:360,r:66});S.shake=Math.min((S.shake||0)+5,8);SFX.boom();}
 function drawFx(){for(const f of S.fx){if(f.t<0)continue;
   if(f.type==='flash'){const p=f.t/f.dur,a=(1-p)*0.55;ctx.save();ctx.globalCompositeOperation='lighter';
     const fc=pal().mood.flash,g=ctx.createRadialGradient(f.x,f.y,0,f.x,f.y,f.r);g.addColorStop(0,'rgba('+fc+','+a+')');g.addColorStop(1,'rgba('+fc+',0)');
@@ -683,7 +722,7 @@ function drawPopups(){for(const p of S.popups){const a=Math.max(0,1-p.t/900);ctx
 /* loop */
 let lastT=0;
 function loop(now){if(!lastT)lastT=now;const dt=now-lastT;lastT=now;
-  if(S){S.fxClock=(S.fxClock||0)+dt;
+  if(S){S.fxClock=(S.fxClock||0)+dt;if(S.shake){S.shake*=0.86;if(S.shake<0.4)S.shake=0;}
     for(const tw of S.tweens){tw.elapsed+=dt;const p=Math.min(1,tw.elapsed/tw.dur);const e=p<0.5?2*p*p:1-Math.pow(-2*p+2,2)/2;
       tw.u.rx=tw.a[0]+(tw.b[0]-tw.a[0])*e;tw.u.ry=tw.a[1]+(tw.b[1]-tw.a[1])*e;if(p>=1){tw.done=true;tw.res&&tw.res();}}
     S.tweens=S.tweens.filter(t=>!t.done);for(const p of S.popups)p.t+=dt;S.popups=S.popups.filter(p=>p.t<1000);
@@ -708,7 +747,7 @@ function targetsFrom(u,x,y){const r=effRange(u,x,y),out=[];if((r[1]||0)<1)return
   const fog=(S.fogOn&&isHuman(u.owner))?computeFog(u.owner):null;
   for(const e of S.units){if(e.owner===u.owner||e.hp<=0||e.loaded)continue;if(fog&&!fog.has(key(e.x,e.y)))continue;
     const d=manh(x,y,e.x,e.y);if(d>=r[0]&&d<=r[1]&&(DMG[u.type][UNITS[e.type].cat]||0)>0)out.push(e);}return out;}
-function selectUnit(u){const field=reachField(u);const {stops,loadTiles}=stoppable(u,field);
+function selectUnit(u){SFX.select();const field=reachField(u);const {stops,loadTiles}=stoppable(u,field);
   const fire=u.moved?[]:targetsFrom(u,u.x,u.y);                                    // any unit can fire in place
   const caps=UNITS[u.type].cap?stops.filter(([x,y])=>isBuilding(x,y)&&tileAt(x,y).owner!==u.owner):[];
   S.sel={unit:u,field,stops,loadTiles,phase:'move',origin:[u.x,u.y],fireFromHere:fire,capTargets:caps};showUnitCard(u);tutAdvance('select');}
@@ -727,7 +766,7 @@ function handleClick(x,y){const s=S.sel,me=S.side;
 async function moveThenMenu(u,x,y){const field=S.sel.field,moved=(x!==u.x||y!==u.y);
   if(S.sel.loadTiles&&S.sel.loadTiles.has(key(x,y))){const apcU=unitAt(x,y);S.busy=true;hideMenu();const path=pathTo(u,field,x,y);path.pop();if(path.length>1)await animateMove(u,path);
     u.loaded=true;u.acted=true;apcU.cargo.push(u);S.busy=false;popup(apcU.x,apcU.y,'loaded','#cfe0d0');deselect();return;}
-  const path=pathTo(u,field,x,y);S.busy=true;hideMenu();if(moved){await animateMove(u,path);u.moved=true;}S.busy=false;openMenu(u);}
+  const path=pathTo(u,field,x,y);S.busy=true;hideMenu();if(moved){SFX.move();await animateMove(u,path);u.moved=true;}S.busy=false;openMenu(u);}
 function openMenu(u){tutAdvance('move');const targets=(UNITS[u.type].indirect&&u.moved)?[]:targetsFrom(u,u.x,u.y);const t=tileAt(u.x,u.y);
   const canCap=UNITS[u.type].cap&&TT[t.t].building&&t.owner!==u.owner;const canUnload=u.type==='apc'&&u.cargo.length>0&&adjacentDrops(u).length>0;
   if(!targets.length&&!canCap&&!canUnload){            // nothing to choose — a move just commits (no menu, no Wait button)
@@ -753,6 +792,9 @@ function hideMenu(){document.getElementById('menu').style.display='none';}
 
 /* build */
 let buildAt=null;
+const DEPLOY_CAP=3;                                                  // units a single factory can deploy per turn
+function factoryUses(){return buildAt?(tileAt(buildAt[0],buildAt[1]).builtThisTurn||0):0;}
+function canDeploy(k){return !!buildAt&&S.gold[S.side]>=UNITS[k].cost&&factoryUses()<DEPLOY_CAP&&!!freeDeployTile(k);}
 // a deploy slot for a freshly-built unit: the factory tile if free, else an empty passable tile beside it
 function freeDeployTile(k){const cls=UNITS[k].cls,[fx,fy]=buildAt;
   const ok=(x,y)=>inB(x,y)&&!unitAt(x,y)&&TT[tileAt(x,y).t].move[cls]<99;
@@ -760,17 +802,17 @@ function freeDeployTile(k){const cls=UNITS[k].cls,[fx,fy]=buildAt;
   for(const [dx,dy] of [[0,1],[1,0],[0,-1],[-1,0]])if(ok(fx+dx,fy+dy))return [fx+dx,fy+dy];
   return null;}
 function openBuild(x,y){deselect();buildAt=[x,y];renderBuild();positionPop(document.getElementById('build'),x,y);}
-function renderBuild(){const me=S.side,el=document.getElementById('build');el.innerHTML='<h4>Deploy units · '+S.gold[me]+'g</h4>';
-  for(const k of BUILD_ORDER){const u=UNITS[k];const b=document.createElement('button');b.className='buy';b.disabled=S.gold[me]<u.cost||!freeDeployTile(k);
+function renderBuild(){const me=S.side,el=document.getElementById('build');el.innerHTML='<h4>Deploy units · '+S.gold[me]+'g · '+(DEPLOY_CAP-factoryUses())+' left</h4>';
+  for(const k of BUILD_ORDER){const u=UNITS[k];const b=document.createElement('button');b.className='buy';b.disabled=!canDeploy(k);
     const ic=document.createElement('canvas');ic.width=60;ic.height=60;drawUnitIcon(ic,k,me);
     const nm=document.createElement('span');nm.className='nm';nm.innerHTML=u.name+'<small>'+u.desc+'</small>';
     const pr=document.createElement('span');pr.className='pr';pr.textContent=u.cost;b.appendChild(ic);b.appendChild(nm);b.appendChild(pr);b.onclick=()=>buyUnit(k);el.appendChild(b);}
   const c=mk('fc','✓ Done');c.style.cssText='width:100%;background:transparent;';c.onclick=hideBuild;el.appendChild(c);}
-function buyUnit(k){const u=UNITS[k];if(!buildAt||S.gold[S.side]<u.cost)return;const t=freeDeployTile(k);if(!t)return;
-  S.gold[S.side]-=u.cost;const [x,y]=t;
+function buyUnit(k){if(!canDeploy(k))return;const u=UNITS[k],t=freeDeployTile(k),[x,y]=t,ft=tileAt(buildAt[0],buildAt[1]);
+  S.gold[S.side]-=u.cost;ft.builtThisTurn=(ft.builtThisTurn||0)+1;
   S.units.push({id:uid++,owner:S.side,type:k,x,y,rx:x,ry:y,hp:10,acted:true,moved:true,loaded:false,cargo:[]});
-  popup(x,y,'+'+u.name,S.side==='P'?'#9fc8ff':'#ffb4ae');updateHUD();
-  if(BUILD_ORDER.some(kk=>S.gold[S.side]>=UNITS[kk].cost&&freeDeployTile(kk)))renderBuild();else hideBuild();}   // keep deploying while gold + room remain
+  popup(x,y,'+'+u.name,S.side==='P'?'#9fc8ff':'#ffb4ae');SFX.build();updateHUD();
+  if(BUILD_ORDER.some(kk=>canDeploy(kk)))renderBuild();else hideBuild();}   // keep deploying while gold + room remain
 function hideBuild(){document.getElementById('build').style.display='none';buildAt=null;}
 
 /* unit icons + card */
@@ -792,11 +834,18 @@ async function runAI(){await sleep(320);aiProduce();updateHUD();
   const order=u=>['tank','arty','sniper','rocket','chopper'].includes(u.type)?0:1;
   const list=S.units.filter(u=>u.owner==='E'&&!u.acted&&!u.loaded).sort((a,b)=>order(a)-order(b));
   for(const u of list){if(S.over)return;if(u.hp<=0||u.acted)continue;await aiActUnit(u);await sleep(150);}await sleep(220);if(!S.over)aiEndTurn();}
-function aiProduce(){const facts=buildingsOf('E').filter(([x,y])=>tileAt(x,y).t==='factory'&&!unitAt(x,y));
-  for(const [x,y] of facts){const aff=AI_BUILD.filter(k=>UNITS[k].cost<=S.gold.E);if(!aff.length)break;
-    const capCount=S.units.filter(u=>u.owner==='E'&&UNITS[u.type].cap).length;let pick;
-    if(capCount<2&&S.gold.E>=150&&Math.random()<0.6)pick='rifle';else{const strong=['chopper','tank','arty','sniper','rocket','rifle','scout'].filter(k=>aff.includes(k));pick=Math.random()<0.7?strong[0]:strong[Math.min(strong.length-1,1+(Math.random()*2|0))];}
-    const u=UNITS[pick];S.gold.E-=u.cost;S.units.push({id:uid++,owner:'E',type:pick,x,y,rx:x,ry:y,hp:10,acted:true,moved:true,loaded:false,cargo:[]});popup(x,y,'+'+u.name,'#ffb4ae');}}
+function aiDeployTile(fx,fy,cls){const ok=(x,y)=>inB(x,y)&&!unitAt(x,y)&&TT[tileAt(x,y).t].move[cls]<99;
+  if(ok(fx,fy))return [fx,fy];for(const [dx,dy] of [[0,1],[1,0],[0,-1],[-1,0]])if(ok(fx+dx,fy+dy))return [fx+dx,fy+dy];return null;}
+function aiProduce(){const facts=buildingsOf('E').filter(([x,y])=>tileAt(x,y).t==='factory');const stop={easy:0.6,normal:0.35,hard:0.12}[S.diff]||0.35;
+  for(const [fx,fy] of facts){let n=0;
+    while(n<DEPLOY_CAP){const aff=AI_BUILD.filter(k=>UNITS[k].cost<=S.gold.E&&aiDeployTile(fx,fy,UNITS[k].cls));if(!aff.length)break;
+      const capCount=S.units.filter(u=>u.owner==='E'&&UNITS[u.type].cap).length;let pick;
+      if(capCount<2&&S.gold.E>=150&&aff.includes('rifle')&&Math.random()<0.6)pick='rifle';
+      else{const strong=['chopper','tank','arty','sniper','rocket','rifle','scout'].filter(k=>aff.includes(k));pick=Math.random()<0.7?strong[0]:strong[Math.min(strong.length-1,1+(Math.random()*2|0))];}
+      const t=aiDeployTile(fx,fy,UNITS[pick].cls);if(!t)break;const u=UNITS[pick];
+      S.gold.E-=u.cost;S.units.push({id:uid++,owner:'E',type:pick,x:t[0],y:t[1],rx:t[0],ry:t[1],hp:10,acted:true,moved:true,loaded:false,cargo:[]});popup(t[0],t[1],'+'+u.name,'#ffb4ae');n++;
+      if(Math.random()<stop)break;}                                  // lower difficulties usually build fewer; Commander fills the cap
+  }}
 const unitValue=u=>UNITS[u.type].cost/100;
 async function aiActUnit(u){const field=reachField(u);const {stops}=stoppable(u,field);const ind=UNITS[u.type].indirect,hasGun=(UNITS[u.type].range[1]||0)>=1;let best=null;
   if(hasGun){const from=ind?[[u.x,u.y]]:stops;for(const [tx,ty] of from){const r=effRange(u,tx,ty);
@@ -859,6 +908,7 @@ document.getElementById('passReady').onclick=()=>{document.getElementById('passS
 
 /* end screen */
 function endGame(side){if(S.over)return;S.over=true;S.winner=side;S.busy=false;draw();
+  if(S.mode==='ai'&&side==='E')SFX.lose();else SFX.win();
   const win=S.mode==='hotseat'?true:side==='P';const t=document.getElementById('endTitle');
   if(S.mode==='hotseat'){t.textContent=(side==='P'?'Blue':'Red')+' Wins';t.className=side==='P'?'res-win':'res-lose';}
   else{t.textContent=side==='P'?'Victory':'Defeat';t.className=side==='P'?'res-win':'res-lose';}
@@ -928,6 +978,7 @@ document.getElementById('briefBack').onclick=openRoadmap;
 document.querySelectorAll('[data-home]').forEach(b=>b.onclick=()=>gotoScreen('homeScreen'));
 document.getElementById('brandBtn').onclick=()=>{if(S&&!S.over){if(confirm('Leave the battle and return home?')){S=null;gotoScreen('homeScreen');}}else gotoScreen('homeScreen');};
 document.getElementById('helpBtn').onclick=()=>document.getElementById('helpScreen').classList.add('show');
+document.getElementById('muteBtn').textContent=muted?'🔇':'🔊';document.getElementById('muteBtn').onclick=toggleMute;
 document.getElementById('helpClose').onclick=()=>document.getElementById('helpScreen').classList.remove('show');
 document.getElementById('endBtn').onclick=endTurn;
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&S&&!S.busy)cancelSel();if((e.key==='e'||e.key==='E')&&S&&!S.over)endTurn();});
