@@ -719,7 +719,9 @@ function handleClick(x,y){const s=S.sel,me=S.side;
     if(!u.moved){const tgt=(s.fireFromHere||[]).find(e=>e.x===x&&e.y===y);if(tgt){commitAttack(u,tgt);return;}}   // attack in place
     if(s.stops.some(p=>p[0]===x&&p[1]===y)){moveThenMenu(u,x,y);return;}
     const other=unitAt(x,y);if(other&&other.owner===me&&!other.acted){selectUnit(other);return;}deselect();return;}
-  if(s.phase==='menu'){const tgt=s.targets&&s.targets.find(e=>e.x===x&&e.y===y);if(tgt){commitAttack(s.unit,tgt);return;}cancelSel();return;}
+  if(s.phase==='menu'){const tgt=s.targets&&s.targets.find(e=>e.x===x&&e.y===y);if(tgt){commitAttack(s.unit,tgt);return;}
+    if(x===s.unit.x&&y===s.unit.y){s.unit.acted=true;hideMenu();deselect();tutAdvance('act');return;}   // tap your unit = hold position
+    cancelSel();return;}
   if(s.phase==='target'){const tgt=s.targets.find(e=>e.x===x&&e.y===y);if(tgt){commitAttack(s.unit,tgt);return;}openMenu(s.unit);return;}
   if(s.phase==='unload'){const d=s.dropTiles.find(p=>p[0]===x&&p[1]===y);if(d){doUnload(s.unit,x,y);return;}cancelSel();return;}}
 async function moveThenMenu(u,x,y){const field=S.sel.field,moved=(x!==u.x||y!==u.y);
@@ -728,12 +730,13 @@ async function moveThenMenu(u,x,y){const field=S.sel.field,moved=(x!==u.x||y!==u
   const path=pathTo(u,field,x,y);S.busy=true;hideMenu();if(moved){await animateMove(u,path);u.moved=true;}S.busy=false;openMenu(u);}
 function openMenu(u){tutAdvance('move');const targets=(UNITS[u.type].indirect&&u.moved)?[]:targetsFrom(u,u.x,u.y);const t=tileAt(u.x,u.y);
   const canCap=UNITS[u.type].cap&&TT[t.t].building&&t.owner!==u.owner;const canUnload=u.type==='apc'&&u.cargo.length>0&&adjacentDrops(u).length>0;
+  if(!targets.length&&!canCap&&!canUnload){            // nothing to choose — a move just commits (no menu, no Wait button)
+    if(u.moved){u.acted=true;tutAdvance('act');}deselect();return;}
   S.sel={unit:u,phase:'menu',targets,field:S.sel.field,origin:S.sel.origin};
   const m=document.getElementById('menu');m.innerHTML='';
   if(targets.length){const b=mk('atk','⚔ Attack');b.onclick=()=>{S.sel.phase='target';hideMenu();};m.appendChild(b);}
   if(canCap){const b=mk('cap','⚑ Capture '+TT[t.t].name);b.onclick=()=>{S.busy=true;hideMenu();doCapture(u);S.busy=false;deselect();tutAdvance('act');};m.appendChild(b);}
   if(canUnload){const b=mk('unl','⇲ Unload');b.onclick=()=>{S.sel.phase='unload';S.sel.dropTiles=adjacentDrops(u);hideMenu();};m.appendChild(b);}
-  const w=mk('','✓ Wait');w.onclick=()=>{u.acted=true;hideMenu();deselect();tutAdvance('act');};m.appendChild(w);
   const c=mk('fc','✕ Cancel');c.onclick=cancelSel;m.appendChild(c);positionPop(m,u.x,u.y);showUnitCard(u);}
 function mk(cls,txt){const b=document.createElement('button');if(cls)b.className=cls;b.textContent=txt;return b;}
 function adjacentDrops(apcU){const out=[];const cargo=apcU.cargo[apcU.cargo.length-1];if(!cargo)return out;
@@ -832,7 +835,7 @@ function updateHint(){if(!S||S.over)return;
       else if(s.capTargets&&s.capTargets.length)setHint('Move onto a gold <b>⚑ building</b>, then Capture it for income.');
       else setHint('<b>Blue</b> = where it can go. Tap a tile to move. Right-click cancels.');}
     else if(s.phase==='menu'){const u=s.unit,bt=tileAt(u.x,u.y);const cc=UNITS[u.type].cap&&TT[bt.t].building&&bt.owner!==u.owner;
-      setHint(cc?'<b>Capture</b> takes this building — keep the unit here over turns to <b>finish the hold</b>.':(s.targets&&s.targets.length?'Tap a <b>red</b> enemy to attack — or pick an action.':'Pick an action: Wait or Cancel.'));}
+      setHint(cc?'<b>Capture</b> takes this building — keep the unit here over turns to <b>finish the hold</b>.':(s.targets&&s.targets.length?'Tap a <b>red</b> enemy to attack, tap your unit to <b>hold</b>, or Cancel.':'Tap your unit to <b>hold</b>, or Cancel.'));}
     else if(s.phase==='target')setHint('Tap a highlighted enemy. The bubble shows damage dealt vs. taken.');
     else if(s.phase==='unload')setHint('Tap a <b>green</b> tile to deploy the troops.');}}
 
@@ -868,7 +871,7 @@ function setProgress(n){localStorage.setItem('ps_progress',Math.max(getProgress(
 const TUT=[
  {t:"👋 Welcome, Commander. Tap one of your <b>units</b> to select it.",trig:'select'},
  {t:"<b>Blue tiles</b> show where it can move. Tap one to move there.",trig:'move'},
- {t:"Now act — <b>Attack</b> a foe in range, <b>Capture</b> a building, or <b>Wait</b>.",trig:'act'},
+ {t:"Now act — <b>Attack</b> a foe in range or <b>Capture</b> a building. Moving alone ends a unit's turn.",trig:'act'},
  {t:"All units done? Hit <b>End Turn</b> to bank gold and let the enemy move.",trig:'end'},
  {t:"🎯 That's the whole loop. Capture the enemy <b>HQ</b> to win this operation — good luck!",trig:'done'},
 ];
