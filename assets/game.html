@@ -204,7 +204,7 @@
    Single file, no dependencies, all art drawn on canvas.
    ============================================================ */
 const TILE=56, TY=48, LIP=10;            // grid metrics — square grid kept so input math stays simple
-const IW=64,IH=32,HW=32,HH=16,EH=13,WALLH=20;  // isometric tile w/h, half-w/h, elevation step, island thickness
+const IW=64,IH=40,HW=32,HH=20,EH=15,WALLH=24;  // isometric tile w/h (~1.6:1 = gentler tilt), half-w/h, elevation step, island thickness
 let DPR=1,OX=0,OY=0,terrCanvas=null;           // device pixel ratio, iso board origin, cached static-terrain layer
 
 /* ---------- terrain ---------- */
