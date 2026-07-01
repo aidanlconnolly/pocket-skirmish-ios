@@ -174,7 +174,7 @@
     <div style="text-align:left;max-width:560px;color:var(--muted);font-size:14px;line-height:1.55">
       <p><b style="color:var(--ink)">1 · Move.</b> Tap a unit — the <b style="color:#7cb0ff">blue tiles</b> are everywhere it can go this turn. Tap one to move there. Forests/mountains cost more to enter but give cover.</p>
       <p><b style="color:var(--ink)">2 · Attack.</b> Enemies in range glow <b style="color:#ff8c80">red</b> — tap one to fire <b>without moving</b>, or move first and then attack. A <b style="color:var(--gold)">forecast</b> shows the damage dealt and taken, so every shot is a real decision. Out-range them to avoid the counter.</p>
-      <p><b style="color:var(--ink)">3 · High ground.</b> Stand a Sniper on a <b>Hill (▲)</b> or <b>Mountain (▲▲)</b> and its range <b>extends</b> — snipe from afar while staying out of reach. High ground also gives more cover and sight.</p>
+      <p><b style="color:var(--ink)">3 · High ground.</b> Stand a Sniper or Artillery on a <b>Hill (▲)</b> or <b>Mountain (▲▲)</b> and their range <b>extends</b> — snipe from afar while staying out of reach. High ground also gives more cover and sight.</p>
       <p><b style="color:var(--ink)">4 · Earn &amp; repair.</b> Buildings pay gold each turn: City +100, HQ +200, <b style="color:var(--gold)">Oil Rig +300</b> — and any unit parked on a building you own <b style="color:#7ce08a">heals +2 HP</b>. Select a <b>Sentry</b> (for HQ/cities/barracks) — capturable buildings ring <b style="color:var(--gold)">gold ⚑</b>. Move on, pick <b>Capture</b>, and <b>hold the spot</b> until the bar fills (about two turns — leave and it resets). <b>Oil rigs are different:</b> only an <b>Engineer</b> takes them — just move it in and it seizes the rig instantly. Gold builds units at your Barracks.</p>
       <p><b style="color:var(--ink)">5 · End Turn.</b> When you're done, End Turn collects your income and lets the enemy move. The button glows when all your units have acted.</p>
       <p><b style="color:var(--ink)">Win:</b> capture the enemy <b>HQ</b> (move onto it, Capture twice) or destroy their whole army. <b>Strategy:</b> the player who controls the oil out-builds the other — fight for it.</p>
@@ -228,15 +228,17 @@ const UNITS = {
   sentry:   {name:'Sentry',    cost:150, move:3, cls:'foot',  range:[1,1], cat:'inf', cap:'other', indirect:false, vis:2, desc:'Basic soldier. Captures HQ, cities & barracks.'},
   ballistic:{name:'Ballistic', cost:250, move:3, cls:'foot',  range:[1,1], cat:'inf', cap:false,   indirect:false, vis:2, desc:'One-shots any Tank or Helicopter.'},
   sniper:   {name:'Sniper',    cost:300, move:3, cls:'foot',  range:[1,3], cat:'inf', cap:false,   indirect:false, vis:3, desc:'One-shots any foot soldier. Long range.'},
+  apc:      {name:'Transport', cost:300, move:6, cls:'tread', range:[0,0], cat:'veh', cap:false,   indirect:false, vis:2, carry:2, desc:'Carries 2 foot units. No weapon.'},
+  arty:     {name:'Artillery', cost:450, move:5, cls:'tread', range:[2,3], cat:'veh', cap:false,   indirect:true,  vis:2, desc:'Indirect fire. Hits hard, no return fire.'},
   tank:     {name:'Tank',      cost:600, move:6, cls:'tread', range:[1,1], cat:'veh', cap:false,   indirect:false, vis:3, desc:'Armoured spearhead. Strong all-round.'},
   chopper:  {name:'Helicopter',cost:700, move:7, cls:'air',   range:[1,1], cat:'air', cap:false,   indirect:false, vis:4, desc:'Flies over everything. Fears Ballistics.'},
 };
-const BUILD_ORDER=['engineer','sentry','ballistic','sniper','tank','chopper'];
-const AI_BUILD=['engineer','sentry','ballistic','sniper','tank','chopper'];
+const BUILD_ORDER=['engineer','sentry','ballistic','sniper','apc','arty','tank','chopper'];
+const AI_BUILD=['engineer','sentry','ballistic','sniper','arty','tank','chopper'];
 /* base damage /10; one-shot matchups (sniper→inf, ballistic→veh/air) are lethal-overridden in predictDamage */
 const DMG = {
   engineer:{inf:0,veh:0,air:0}, sentry:{inf:55,veh:8,air:5}, ballistic:{inf:45,veh:85,air:80},
-  sniper:{inf:75,veh:20,air:15}, tank:{inf:75,veh:55,air:12}, chopper:{inf:70,veh:65,air:48},
+  sniper:{inf:75,veh:20,air:15}, apc:{inf:0,veh:0,air:0}, arty:{inf:90,veh:70,air:0}, tank:{inf:75,veh:55,air:12}, chopper:{inf:70,veh:65,air:48},
 };
 
 /* ---------- maps ---------- */
@@ -601,8 +603,8 @@ function drawUnit(u){
   const col=ownerCol(u.owner),dk=ownerDk(u.owner),lt=u.owner==='P'?'#7cb0ff':'#ff9c92';
   ctx.lineWidth=1.8;ctx.strokeStyle='#1c2e21';ctx.lineJoin='round';
   switch(u.type){case 'sentry':case 'engineer':soldier(cx,cy,dir,col,dk,lt,u.type);break;case 'ballistic':rocketeer(cx,cy,dir,col,dk,lt);break;
-    case 'sniper':marksman(cx,cy,dir,col,dk,lt);break;case 'tank':tank(cx,cy,dir,col,dk,lt);break;
-    case 'chopper':chopper(cx,cy,dir,col,dk,lt);break;}
+    case 'sniper':marksman(cx,cy,dir,col,dk,lt);break;case 'tank':tank(cx,cy,dir,col,dk,lt);break;case 'arty':artillery(cx,cy,dir,col,dk,lt);break;
+    case 'apc':apc(cx,cy,dir,col,dk,lt);break;case 'chopper':chopper(cx,cy,dir,col,dk,lt);break;}
   ctx.globalAlpha=1;
   if(u.hp<10){const bw=24;ctx.fillStyle='rgba(0,0,0,.6)';roundRect(cx-bw/2,baseY+3,bw,5,2.5);ctx.fill();
     const f=u.hp/10;ctx.fillStyle=u.hp<=3?'#ef5a52':u.hp<=6?'#f5c84b':'#7ce08a';roundRect(cx-bw/2+1,baseY+4,(bw-2)*f,3,1.5);ctx.fill();}
@@ -795,12 +797,15 @@ function handleClick(x,y){const s=S.sel,me=S.side;
   if(s.phase==='target'){const tgt=s.targets.find(e=>e.x===x&&e.y===y);if(tgt){commitAttack(s.unit,tgt);return;}openMenu(s.unit);return;}
   if(s.phase==='unload'){const d=s.dropTiles.find(p=>p[0]===x&&p[1]===y);if(d){doUnload(s.unit,x,y);return;}cancelSel();return;}}
 async function moveThenMenu(u,x,y){const field=S.sel.field,moved=(x!==u.x||y!==u.y);
+  if(S.sel.loadTiles&&S.sel.loadTiles.has(key(x,y))){const apcU=unitAt(x,y);S.busy=true;hideMenu();const path=pathTo(u,field,x,y);path.pop();if(path.length>1)await animateMove(u,path);
+    u.loaded=true;u.acted=true;apcU.cargo.push(u);S.busy=false;popup(apcU.x,apcU.y,'loaded','#cfe0d0');deselect();return;}
   const path=pathTo(u,field,x,y);S.busy=true;hideMenu();if(moved){SFX.move();await animateMove(u,path);u.moved=true;}
   if(tryOilCapture(u)){S.busy=false;deselect();return;}   // engineer walked into an oil rig → seized + consumed
   S.busy=false;openMenu(u);}
-function openMenu(u){tutAdvance('move');let targets=targetsFrom(u,u.x,u.y);const t=tileAt(u.x,u.y);
-  if(u.moved&&S.sel.origin){const o=S.sel.origin;for(const e of targetsFrom(u,o[0],o[1]))if(!targets.includes(e))targets.push(e);}  // keep start-tile targets after moving
-  const canCap=canCapTile(u,u.x,u.y)&&u.type!=='engineer',canUnload=false;
+function openMenu(u){tutAdvance('move');const t=tileAt(u.x,u.y);
+  let targets=(UNITS[u.type].indirect&&u.moved)?[]:targetsFrom(u,u.x,u.y);                        // indirect can't fire after moving
+  if(!UNITS[u.type].indirect&&u.moved&&S.sel.origin){const o=S.sel.origin;for(const e of targetsFrom(u,o[0],o[1]))if(!targets.includes(e))targets.push(e);}  // direct: keep start-tile targets too
+  const canCap=canCapTile(u,u.x,u.y)&&u.type!=='engineer',canUnload=u.type==='apc'&&u.cargo.length>0&&adjacentDrops(u).length>0;
   if(!targets.length&&!canCap&&!canUnload){            // nothing to choose — a move just commits (no menu, no Wait button)
     if(u.moved){u.acted=true;tutAdvance('act');}deselect();return;}
   S.sel={unit:u,phase:'menu',targets,field:S.sel.field,origin:S.sel.origin};
@@ -853,7 +858,7 @@ function drawUnitIcon(canvas,type,owner){const c=canvas.getContext('2d');c.clear
 function miniUnit(c,type,owner,cx,cy){const dir=owner==='P'?-1:1,col=ownerCol(owner),dk=ownerDk(owner),lt=owner==='P'?'#7cb0ff':'#ff9c92';
   c.fillStyle='rgba(0,0,0,.25)';c.beginPath();c.ellipse(cx,cy+13,13,4,0,0,7);c.fill();
   switch(type){case 'sentry':case 'engineer':soldier(cx,cy,dir,col,dk,lt,type);break;case 'ballistic':rocketeer(cx,cy,dir,col,dk,lt);break;case 'sniper':marksman(cx,cy,dir,col,dk,lt);break;
-    case 'tank':tank(cx,cy,dir,col,dk,lt);break;case 'chopper':chopper(cx,cy,dir,col,dk,lt);break;}}
+    case 'tank':tank(cx,cy,dir,col,dk,lt);break;case 'arty':artillery(cx,cy,dir,col,dk,lt);break;case 'apc':apc(cx,cy,dir,col,dk,lt);break;case 'chopper':chopper(cx,cy,dir,col,dk,lt);break;}}
 function showUnitCard(u){const card=document.getElementById('unitCard'),d=UNITS[u.type];const er=effRange(u,u.x,u.y);const high=heightOf(u.x,u.y)>0&&d.range[1]>=2;const r=er[1]<1?'—':(er[0]===er[1]?er[0]:er[0]+'-'+er[1]);
   card.style.display='flex';card.innerHTML='';const ic=document.createElement('canvas');ic.width=84;ic.height=84;const c=ic.getContext('2d');const _ctx=ctx;ctx=c;c.lineWidth=1.8;c.strokeStyle='#1c2e21';c.lineJoin='round';miniUnit(c,u.type,u.owner,42,44);ctx=_ctx;
   const txt=document.createElement('div');txt.innerHTML='<div class="uname" style="color:'+ownerCol(u.owner)+'">'+d.name+'</div>'+
@@ -864,7 +869,7 @@ function hideUnitCard(){document.getElementById('unitCard').style.display='none'
 
 /* ============================================================ AI */
 async function runAI(){await sleep(320);aiProduce();updateHUD();
-  const order=u=>['tank','sniper','ballistic','chopper'].includes(u.type)?0:1;
+  const order=u=>['tank','arty','sniper','ballistic','chopper'].includes(u.type)?0:1;
   const list=S.units.filter(u=>u.owner==='E'&&!u.acted&&!u.loaded).sort((a,b)=>order(a)-order(b));
   for(const u of list){if(S.over)return;if(u.hp<=0||u.acted)continue;await aiActUnit(u);await sleep(150);}await sleep(220);if(!S.over)aiEndTurn();}
 function aiDeployTile(fx,fy,cls){const ok=(x,y)=>inB(x,y)&&!unitAt(x,y)&&TT[tileAt(x,y).t].move[cls]<99;
@@ -875,7 +880,7 @@ function aiProduce(){const facts=buildingsOf('E').filter(([x,y])=>tileAt(x,y).t=
       const sentries=S.units.filter(u=>u.owner==='E'&&u.type==='sentry').length,engs=S.units.filter(u=>u.owner==='E'&&u.type==='engineer').length;let pick;
       if(engs<1&&aff.includes('engineer')&&Math.random()<0.5)pick='engineer';                       // grab oil
       else if(sentries<2&&aff.includes('sentry')&&Math.random()<0.5)pick='sentry';                  // capture / push HQ
-      else{const strong=['chopper','tank','sniper','ballistic','sentry','engineer'].filter(k=>aff.includes(k));pick=Math.random()<0.7?strong[0]:strong[Math.min(strong.length-1,1+(Math.random()*2|0))];}
+      else{const strong=['chopper','tank','arty','sniper','ballistic','sentry','engineer'].filter(k=>aff.includes(k));pick=Math.random()<0.7?strong[0]:strong[Math.min(strong.length-1,1+(Math.random()*2|0))];}
       const t=aiDeployTile(fx,fy,UNITS[pick].cls);if(!t)break;const u=UNITS[pick];
       S.gold.E-=u.cost;S.units.push({id:uid++,owner:'E',type:pick,x:t[0],y:t[1],rx:t[0],ry:t[1],hp:10,acted:false,moved:false,loaded:false,cargo:[]});popup(t[0],t[1],'+'+u.name,'#ffb4ae');n++;
       if(Math.random()<stop)break;}                                  // lower difficulties usually build fewer; Commander fills the cap
